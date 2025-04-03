@@ -1,19 +1,26 @@
 const jwt = require('jsonwebtoken');
 const https = require('https');
-const fs = require('fs');
 
 async function createDeployAnnotation() {
   try {
     // Carregar as credenciais da conta de serviço
     const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+    console.log("Loaded credentials for service account:", credentials.client_email);
     
-    // Gerar token JWT
-    const token = generateJWT(credentials);
+    // Gerar token JWT e obter token de acesso
+    console.log("Generating JWT token...");
+    const token = await getAccessToken(credentials);
+    console.log("Access token obtained successfully");
     
     // Detalhes do push para main do GitHub
-    const commitSha = process.env.GITHUB_SHA;
-    const repoName = process.env.GITHUB_REPOSITORY;
-    const commitMsg = require('child_process').execSync('git log -1 --pretty=%B').toString().trim();
+    const commitSha = process.env.GITHUB_SHA || "unknown-sha";
+    const repoName = process.env.GITHUB_REPOSITORY || "unknown-repo";
+    let commitMsg = "No commit message";
+    try {
+      commitMsg = require('child_process').execSync('git log -1 --pretty=%B').toString().trim();
+    } catch (e) {
+      console.log("Could not get commit message:", e.message);
+    }
     
     // Data atual
     const now = new Date();
@@ -33,51 +40,69 @@ async function createDeployAnnotation() {
       }
     };
 
+    console.log("Annotation data:", JSON.stringify(annotationData));
+
     // URL da API
     const propertyId = process.env.GA4_PROPERTY_ID;
+    console.log("Using GA4 Property ID:", propertyId);
+    
     const apiUrl = `https://analyticsadmin.googleapis.com/v1alpha/properties/${propertyId}/reportingDataAnnotations`;
+    console.log("API URL:", apiUrl);
 
     // Fazer requisição REST
+    console.log("Sending request to create annotation...");
     const response = await makeRequest(apiUrl, 'POST', token, annotationData);
     console.log('Annotation created successfully:', response);
   } catch (error) {
     console.error('Error creating annotation:', error);
+    if (error.response) {
+      console.error('Response details:', error.response);
+    }
     process.exit(1);
   }
 }
 
-// Gerar JWT para autenticação com a service account
-function generateJWT(credentials) {
-  const now = Math.floor(Date.now() / 1000);
-  
-  const payload = {
-    iss: credentials.client_email,
-    sub: credentials.client_email,
-    aud: 'https://oauth2.googleapis.com/token',
-    iat: now,
-    exp: now + 3600, // Token expira em 1 hora
-    scope: 'https://www.googleapis.com/auth/analytics.edit'
-  };
-  
-  const privateKey = credentials.private_key;
-  
-  // Gerar token assinado
-  const signedJwt = jwt.sign(payload, privateKey, { algorithm: 'RS256' });
-  
-  // Obter token de acesso usando o JWT
-  return getAccessToken(signedJwt);
-}
-
-// Obter token de acesso a partir do JWT
-async function getAccessToken(signedJwt) {
-  const tokenEndpoint = 'https://oauth2.googleapis.com/token';
-  const data = {
-    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-    assertion: signedJwt
-  };
-  
-  const response = await makeRequest(tokenEndpoint, 'POST', null, data, 'application/x-www-form-urlencoded');
-  return response.access_token;
+// Obter token de acesso a partir das credenciais
+async function getAccessToken(credentials) {
+  try {
+    // Gerar JWT
+    const now = Math.floor(Date.now() / 1000);
+    
+    const payload = {
+      iss: credentials.client_email,
+      sub: credentials.client_email,
+      aud: 'https://oauth2.googleapis.com/token',
+      iat: now,
+      exp: now + 3600, // Token expira em 1 hora
+      scope: 'https://www.googleapis.com/auth/analytics.edit'
+    };
+    
+    const privateKey = credentials.private_key;
+    
+    // Gerar token assinado
+    console.log("Signing JWT with RS256 algorithm...");
+    const signedJwt = jwt.sign(payload, privateKey, { algorithm: 'RS256' });
+    
+    // Obter token de acesso usando o JWT
+    console.log("Exchanging JWT for access token...");
+    const tokenEndpoint = 'https://oauth2.googleapis.com/token';
+    const data = {
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: signedJwt
+    };
+    
+    const response = await makeRequest(tokenEndpoint, 'POST', null, data, 'application/x-www-form-urlencoded');
+    console.log("Token exchange response received");
+    
+    if (!response.access_token) {
+      throw new Error("No access token received: " + JSON.stringify(response));
+    }
+    
+    return response.access_token;
+  } catch (error) {
+    console.error("Error generating access token:", error);
+    throw error;
+  }
 }
 
 // Função auxiliar para fazer requisições REST
@@ -101,6 +126,8 @@ function makeRequest(url, method, token, data, contentType = 'application/json')
       postData = new URLSearchParams(data).toString();
     }
     
+    console.log(`Making ${method} request to ${url}...`);
+    
     const req = https.request(url, options, (res) => {
       let responseData = '';
       
@@ -109,19 +136,25 @@ function makeRequest(url, method, token, data, contentType = 'application/json')
       });
       
       res.on('end', () => {
+        console.log(`Received response with status code: ${res.statusCode}`);
+        
         if (res.statusCode >= 200 && res.statusCode < 300) {
           try {
-            resolve(JSON.parse(responseData));
+            const parsedData = JSON.parse(responseData);
+            resolve(parsedData);
           } catch (e) {
             resolve(responseData);
           }
         } else {
-          reject(new Error(`Request failed with status code ${res.statusCode}: ${responseData}`));
+          const error = new Error(`Request failed with status code ${res.statusCode}: ${responseData}`);
+          error.response = responseData;
+          reject(error);
         }
       });
     });
     
     req.on('error', (error) => {
+      console.error("Request error:", error.message);
       reject(error);
     });
     

@@ -20,7 +20,7 @@ jobs:
           node-version: 'lts/*'
 
       - name: Install dependencies
-        run: npm install jsonwebtoken
+        run: npm install jsonwebtoken https
 
       - name: create_ga4_annotation
         env:
