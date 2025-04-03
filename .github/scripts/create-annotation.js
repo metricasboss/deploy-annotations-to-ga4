@@ -5,7 +5,7 @@ async function createDeployAnnotation() {
   try {
     // Service Account Authtentication
     const auth = new google.auth.GoogleAuth({
-      credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON),
+      credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON,
       scopes: ['https://www.googleapis.com/auth/analytics.edit']
     });
 

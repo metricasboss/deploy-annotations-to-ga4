@@ -1,9 +1,9 @@
-name: "deploy.annotations.ga4"
+name: "Create GA4 Deploy Annotation"
 
 on:
   push:
     branches:
-      - main  # Run when have push to main branch
+      - main
 
 jobs:
   create-annotation:
@@ -11,7 +11,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      
+        with:
+          fetch-depth: 0
+
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
@@ -20,10 +22,13 @@ jobs:
       - name: Install dependencies
         run: npm install googleapis
 
-      - name: Create Google Analytics 4 Annotation
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
-          GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
 
+      - name: Create GA4 Annotation
+        env:
+          GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
         run: |
           node .github/scripts/create-annotation.js
